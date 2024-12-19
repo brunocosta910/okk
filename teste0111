@@ -1,0 +1,436 @@
+HuntingModule.AutoLoot = {}
+AutoLoot = HuntingModule.AutoLoot
+
+-- Variables
+AutoLoot.lootProc = nil
+AutoLoot.inProgress = false
+AutoLoot.itemList = {
+    -- eventohalowin
+    {
+        id = 2977,
+        text = "pumpkinhead"
+    },
+    -- Stones
+    {
+        id = 3163,
+        text = "leaf stone"
+    },
+    {
+        id = 3164,
+        text = "water stone"
+    },
+    {
+        id = 3165,
+        text = "venom stone"
+    },
+    {
+        id = 3166,
+        text = "thunder stone"
+    },
+    {
+        id = 3167,
+        text = "rock stone"
+    },
+    {
+        id = 3168,
+        text = "punch stone"
+    },
+    {
+        id = 3170,
+        text = "fire stone"
+    },
+    {
+        id = 3171,
+        text = "coccon stone"
+    },
+    {
+        id = 3172,
+        text = "crystal stone"
+    },
+    {
+        id = 3173,
+        text = "darkness stone"
+    },
+    {
+        id = 3174,
+        text = "earth stone"
+    },
+    {
+        id = 3175,
+        text = "enigma stone"
+    },
+    {
+        id = 3176,
+        text = "heart stone"
+    },
+    {
+        id = 3177,
+        text = "ice stone"
+    },
+
+    -- Plates
+    {
+        id = 8624,
+        text = "ice plate"
+    },
+    {
+        id = 8625,
+        text = "heart plate"
+    },
+    {
+        id = 8621,
+        text = "fire plate"
+    },
+    {
+        id = 8626,
+        text = "rock plate"
+    },
+    {
+        id = 8630,
+        text = "water plate"
+    },
+    {
+        id = 8623,
+        text = "ground plate"
+    },
+    {
+        id = 8619,
+        text = "dark plate"
+    },
+    {
+        id = 8620,
+        text = "dragon plate"
+    },
+    {
+        id = 8629,
+        text = "vennon plate"
+    },
+    {
+        id = 8622,
+        text = "grass plate"
+    },
+    {
+        id = 8627,
+        text = "steel plate"
+    },
+    {
+        id = 8641,
+        text = "enigma plate"
+    },
+    {
+        id = 8642,
+        text = "punch plate"
+    },
+    {
+        id = 8618,
+        text = "coccon plate"
+    },
+    {
+        id = 8628,
+        text = "thunder plate"
+    },
+
+    -- Eggs
+    {
+        id = 3215,
+        text = "white egg"
+    },
+    {
+        id = 6542,
+        text = "red egg"
+    },
+    {
+        id = 6543,
+        text = "blue egg"
+    },
+    {
+        id = 6544,
+        text = "green egg"
+    },
+    {
+        id = 6545,
+        text = "purple egg"
+    },
+
+    -- Christmas
+    -- {
+    --     id = ,
+    --     text = "box 2"
+    -- },
+    {
+        id = 10295,
+        text = "hat"
+    },
+    {
+        id = 5909,
+        text = "white christmas cloth"
+    },
+    {
+        id = 5910,
+        text = "green christmas cloth"
+    },
+    {
+        id = 5911,
+        text = "red christmas cloth"
+    },
+    {
+        id = 8638, -- coin of 1
+        text = "coin"
+    },
+    {
+        id = 8637, -- coin of 5
+        text = "coin"
+    },
+    {
+        id = 8636, -- coin of 10
+        text = "coin"
+    },
+    {
+        id = 8635, -- coin of 50
+        text = "coin"
+    },
+    {
+        id = 8634, -- coin of 100
+        text = "coin"
+    }
+}
+AutoLoot.corpses = {}
+AutoLoot.lastCorpseId = nil
+AutoLoot.toLoot = {}
+
+-- Methods
+
+function AutoLoot.init()
+    AutoLoot.resetLoot()
+end
+
+function AutoLoot.resetLoot()
+    AutoLoot.corpses = {}
+    AutoLoot.lastCorpseId = nil
+    AutoLoot.lootProc = nil
+    AutoLoot.inProgress = false
+    AutoLoot.toLoot = {}
+end
+
+function AutoLoot.terminate()
+    AutoLoot.onStopped()
+    AutoLoot.resetLoot()
+end
+
+-- TODO: It's possible to occur an out-of-sync between the corpses and the loot
+-- messages, which can lead to undesired looting. We need to ensure they are
+-- always in sync, which means performing some sort algorithm to match them.
+-- One option is to start collecting 
+function AutoLoot.Event(event)
+    if #AutoLoot.toLoot > 0 and not AutoLoot.inProgress then
+        local toLoot = table.remove(AutoLoot.toLoot, 1)
+        if toLoot then
+            if toLoot.items ~= nil and #toLoot.items > 0 then
+                AutoLoot.inProgress = true
+                print("Looting " .. toLoot.corpse.creatureName .. "...")
+                AutoLoot.lootCreature(toLoot.corpse, toLoot.items)
+            else
+                AutoLoot.inProgress = false
+            end
+        end
+        EventHandler.rescheduleEvent(HuntingModule.getModuleId(), event, 500)
+        return
+    end
+    for i, corpse in ipairs(AutoLoot.corpses) do
+        if os.time() - corpse.timeOfDeath > 5 then table.remove(AutoLoot.corpses, i) end
+    end
+    EventHandler.rescheduleEvent(HuntingModule.getModuleId(), event, 100)
+end
+
+function AutoLoot.onStopped() AutoLoot.stopLooting() end
+
+function AutoLoot.onCreatureDeath(creature)
+    local creatureId = creature:getId()
+    local creatureName = creature:getName():lower()
+    -- We remove e.g. [132] or [21] from the end of the creature name.
+    creatureName = creatureName:gsub("%s*%[.*%]$", "")
+    local position = creature:getPosition()
+
+    if not AutoLoot.isActivated() then return end
+    if creature:getSkull() ~= SkullNone then return end
+    if AutoLoot.lastCorpseId == creatureId then return end
+    AutoLoot.lastCorpseId = creatureId
+    table.insert(AutoLoot.corpses, {
+        creatureId = creatureId,
+        creatureName = creatureName,
+        position = position,
+        timeOfDeath = os.time()
+    })
+
+    -- When a creature becomes an item, the game doesn't send the loot message.
+    -- We need to wait a little bit to ensure the corpse/item is already present
+    -- in the floor. If the corpse happens to be an item we want to loot, we
+    -- start a simple procedure to move it to the backpack.
+    scheduleEvent(function()
+        local tile = g_map.getTile(position)
+        if not tile then return end
+        local topThing = tile:getTopThing()
+        if not topThing then return end
+        for _, item in pairs(AutoLoot.itemList) do
+            if topThing:getId() == item.id then
+                print("Looting " .. item.text .. "from the floor...")
+                local player = g_game.getLocalPlayer()
+                player:stopAutoWalk()
+                g_game.cancelAttackAndFollow()
+                AutoLoot.inProgress = true
+                local toPos = LootProcedure:findItemDestinationPosition(item.id)
+                AutoLoot.floorLootProc = MoveProcedure.create(topThing, toPos, true, 8000)
+                connect(AutoLoot.floorLootProc, {
+                    onFinished = AutoLoot.onFinish,
+                    onTimedOut = AutoLoot.onFinish,
+                    onFailed = AutoLoot.onFinish,
+                    onCancelled = AutoLoot.onFinish,
+                })
+                AutoLoot.floorLootProc:start()
+            end
+        end
+    end, 1000)
+end
+
+function AutoLoot.isActivated() return HuntingModule.getPanel():getChildById("AutoLoot"):isChecked() end
+
+-- isLooting returns whether the module is ready to loot or not, independendly
+-- of the looting being in progress. Other modules can rely on this function
+-- to determine if they should pause their routine to ensure a safe looting.
+function AutoLoot.isLooting() return #AutoLoot.toLoot > 0 or AutoLoot.inProgress end
+
+function AutoLoot.onFinish(id)
+    scheduleEvent(function()
+        AutoLoot.inProgress = false
+    end, 1000)
+end
+
+function AutoLoot.lootCreature(corpse, loot)
+    if not corpse then
+        AutoLoot.stopLooting()
+        return
+    end
+    local tile = g_map.getTile(corpse.position)
+    if not tile then
+        AutoLoot.stopLooting()
+        return
+    end
+    local thing = tile:getTopThing()
+    if not thing then
+        AutoLoot.stopLooting()
+        return
+    end
+
+    local timeoutTicks = 8000
+    AutoLoot.lootProc = LootProcedure.create(corpse.creatureId, corpse.position, thing,
+        timeoutTicks, loot)
+
+    -- Loot procedure finished
+    connect(AutoLoot.lootProc, {
+        onFinished = AutoLoot.onFinish
+    })
+
+    -- Loot procedure timed out
+    connect(AutoLoot.lootProc, {
+        onTimedOut = AutoLoot.onFinish
+    })
+
+    -- Loot procedure failed
+    connect(AutoLoot.lootProc, {
+        onFailed = AutoLoot.onFinish
+    })
+
+    -- Loot procedure cancelled
+    connect(AutoLoot.lootProc, {
+        onCancelled = AutoLoot.onFinish
+    })
+
+    AutoLoot.lootProc:start()
+end
+
+function AutoLoot.pauseLooting()
+    if AutoLoot.lootProc then
+        -- stop looting
+        AutoLoot.lootProc:stop()
+        AutoLoot.lootProc = nil
+    end
+end
+
+function AutoLoot.stopLooting()
+    if AutoLoot.lootProc then
+        -- attempt to cancel looting
+        AutoLoot.lootProc:cancel()
+    end
+end
+
+function AutoLoot.canLoot(creature)
+    local target = HuntingModule.getTarget(creature:getName())
+    if target then return target:getLoot() end
+    return false
+end
+
+function AutoLoot.onTextMessage(mode, text)
+    if not g_game.isOnline() then return end
+    if not AutoLoot.isActivated() then return end
+
+    if mode == MessageModes.Game and string.starts(text, "Loot of") then
+        local textLower = text:lower()
+        local colonIndex = textLower:find(":")
+        local pokeNameIndex = 0
+        if string.starts(textLower, "loot of a ") then
+            pokeNameIndex = 11
+        elseif string.starts(textLower, "loot of an ") then
+            pokeNameIndex = 12
+        end
+        local pokeName = textLower:sub(pokeNameIndex, colonIndex - 1)
+        if pokeName:starts("wild ") then
+            pokeName = pokeName:sub(6)
+        elseif pokeName:starts("christmas ") then
+            pokeName = pokeName:sub(11)
+        end
+        local items = {}
+        for _, item in pairs(AutoLoot.itemList) do
+            if string.find(textLower, item.text) then table.insert(items, item.id) end
+        end
+
+        -- Find the best match between corpses and loot messages.
+        local bestMatch = nil
+        local bestMatchScore = 0
+        for i, corpse in ipairs(AutoLoot.corpses) do
+            local score = AutoLoot.calculateMatchScore(corpse.creatureName, pokeName)
+            if score > bestMatchScore then
+                bestMatch = i
+                bestMatchScore = score
+            end
+        end
+
+        if bestMatch then
+            local corpse = table.remove(AutoLoot.corpses, bestMatch)
+            table.insert(AutoLoot.toLoot, {
+                corpse = corpse,
+                items = items
+            })
+        else
+            print("No corpse found for " .. pokeName)
+            AutoLoot.resetLoot()
+        end
+    end
+end
+
+function AutoLoot.calculateMatchScore(corpseCreatureName, pokeName)
+    local corpseWords = AutoLoot.splitString(corpseCreatureName, " ")
+    local pokeWords = AutoLoot.splitString(pokeName, " ")
+    local score = 0
+    for _, word in ipairs(pokeWords) do
+        if table.contains(corpseWords, word) then score = score + 1 end
+    end
+    return score
+end
+
+function AutoLoot.splitString(str, delimiter)
+    local result = {}
+    for word in string.gmatch(str, "([^" .. delimiter .. "]+)") do table.insert(result, word) end
+    return result
+end
+
+function string.starts(str, prefix) return string.sub(str, 1, string.len(prefix)) == prefix end
